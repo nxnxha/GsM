@@ -242,7 +242,6 @@ async def gossip_panel(interaction: discord.Interaction):
             "**Bienvenue dans l’Espace Gossip de Miri !**\n\n"
             "Ici, tu peux **soumettre une confession** et répondre dans le **thread dédié**.\n"
             "Les réponses peuvent être **anonymes**.\n\n"
-            "⚠️ Réservé aux **18 ans et plus**.\n\n"
             "Clique ci-dessous pour commencer :"
         ),
         color=BRAND_COLOR,
