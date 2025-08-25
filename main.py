@@ -12,7 +12,7 @@ import random
 TOKEN             = os.getenv("DISCORD_TOKEN", "REPLACE_ME")
 GUILD_ID          = int(os.getenv("GUILD_ID", "1382730341944397967"))
 GOSSIP_CHANNEL_ID = int(os.getenv("GOSSIP_CHANNEL_ID", "1400520302416367796"))
-LOG_CHANNEL_ID    = int(os.getenv("LOG_CHANNEL_ID", "1400520703874433146"))
+LOG_CHANNEL_ID    = int(os.getenv("LOG_CHANNEL_ID", "1409227450554126396"))
 
 AUTHOR_NAME       = os.getenv("AUTHOR_NAME", "Gossip Miri")
 THEME_COLOR_HEX   = os.getenv("THEME_COLOR_HEX", "0x603A30")   # #603A30
