@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
-# Gossip Miri 💋 — Version Girly avec Validation (Fondas/Couronnes)
-# Discord.py 2.x — Style Gossip Girl
+# 💋 Gossip Miri — Version Girly corrigée (validation + boutons persistants)
 # by ChatGPT 💄
 
 import os, json, logging, datetime as dt, random
@@ -8,7 +7,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-# --------- CONFIGURATION ENV ----------
+# --------- CONFIGURATION ----------
 TOKEN = os.getenv("DISCORD_TOKEN", "REPLACE_ME")
 
 # salons
@@ -18,15 +17,16 @@ VALIDATION_CHANNEL_ID = 1424224671485661327
 LOG_CHANNEL_ID = 1409227450554126396
 
 # rôles
-VALIDATION_ROLE_ID = 1400518143595778079  # ping dans le salon de validation
-PUBLIC_ROLE_ID = 1423705639288574003      # ping dans le salon public
+VALIDATION_ROLE_ID = 1400518143595778079   # rôle ping validation
+PUBLIC_ROLE_ID = 1423705639288574003       # rôle ping public
+VALIDATOR_ROLE_IDS = [1400518143595778079] # fonda / couronne autorisés
 
-# thème
+# esthétique
 AUTHOR_NAME = "💋 Gossip Miri"
 THEME_COLOR = 0xFFB6C1
-PANEL_BANNER_URL = os.getenv("PANEL_BANNER_URL", "")
+PANEL_BANNER_URL = ""
 PIN_MESSAGE = False
-BANLIST_FILE = os.getenv("BANLIST_FILE", "gossip_banlist.json")
+BANLIST_FILE = "gossip_banlist.json"
 
 # --------- LOG ----------
 logging.basicConfig(level=logging.INFO)
@@ -62,6 +62,7 @@ class MiriBot(commands.Bot):
         self.synced = False
 
     async def setup_hook(self):
+        # persist views
         self.add_view(PanelView())
         self.add_view(GossipActionsView())
         self.add_view(ValidationView(0, "", True))
@@ -92,7 +93,7 @@ def girly_embed(title: str, desc: str, color=THEME_COLOR) -> discord.Embed:
     emb.set_footer(text="XOXO, Gossip Miri 💄")
     return emb
 
-# --------- UI PANEL ----------
+# --------- PANEL ----------
 def embed_panel() -> discord.Embed:
     emb = girly_embed(
         "💋 Gossip Miri — Le Mur des Secrets",
@@ -110,23 +111,13 @@ class PanelView(discord.ui.View):
     @discord.ui.button(label="Soumettre un gossip 💌", style=discord.ButtonStyle.primary, emoji="💖", custom_id="gossip:open")
     async def open_modal(self, interaction: discord.Interaction, _):
         if is_banned(interaction.user.id):
-            return await interaction.response.send_message("🚫 Tu es banni(e) des confessions, darling 💔", ephemeral=True)
+            return await interaction.response.send_message("🚫 Tu es banni(e) des confessions 💔", ephemeral=True)
         await interaction.response.send_modal(SubmitModal())
 
-# --------- GOSSIP SUBMISSION ----------
+# --------- SUBMISSION ----------
 class SubmitModal(discord.ui.Modal, title="✨ Nouveau Gossip 💄"):
-    content = discord.ui.TextInput(
-        label="Ton gossip (reste chic, gossip girl style)",
-        style=discord.TextStyle.paragraph,
-        max_length=1800,
-        required=True
-    )
-    anonymous = discord.ui.TextInput(
-        label="Publier en anonyme ? (oui/non)",
-        style=discord.TextStyle.short,
-        default="oui",
-        required=True
-    )
+    content = discord.ui.TextInput(label="Ton gossip (reste chic, gossip girl style)", style=discord.TextStyle.paragraph, max_length=1800)
+    anonymous = discord.ui.TextInput(label="Publier en anonyme ? (oui/non)", style=discord.TextStyle.short, default="oui")
 
     async def on_submit(self, interaction: discord.Interaction):
         if is_banned(interaction.user.id):
@@ -142,7 +133,7 @@ class SubmitModal(discord.ui.Modal, title="✨ Nouveau Gossip 💄"):
         if not validation_ch:
             return await interaction.followup.send("⚠️ Oups, le salon de validation est introuvable 😢", ephemeral=True)
 
-        ping_role = validation_ch.guild.get_role(1400518143595778079)
+        ping_role = validation_ch.guild.get_role(VALIDATION_ROLE_ID)
         val_embed = girly_embed(
             "💋 Nouveau gossip en attente…",
             f"**Auteur :** {interaction.user.mention} (`{interaction.user.id}`)\n"
@@ -162,11 +153,11 @@ class SubmitModal(discord.ui.Modal, title="✨ Nouveau Gossip 💄"):
             color=0xFFB6C1
         )
         await log_ch.send(embed=log_embed)
-        await interaction.followup.send("💅 Ton gossip a été envoyé aux fondas pour validation. Patiente, darling 💋", ephemeral=True)
+        await interaction.followup.send("💅 Ton gossip a été envoyé aux fondas pour validation 💋", ephemeral=True)
 
-# --------- VALIDATION VIEW ----------
+# --------- VALIDATION ----------
 async def has_validation_role(member: discord.Member) -> bool:
-    return any(r.name.lower() in ("fonda", "couronne") for r in member.roles)
+    return any(r.id in VALIDATOR_ROLE_IDS for r in member.roles)
 
 class ValidationView(discord.ui.View):
     def __init__(self, author_id: int, content: str, anonymous: bool):
@@ -178,7 +169,7 @@ class ValidationView(discord.ui.View):
     @discord.ui.button(label="💖 Valider", style=discord.ButtonStyle.success, emoji="💌", custom_id="gossip:approve")
     async def approve(self, interaction: discord.Interaction, _):
         if not await has_validation_role(interaction.user):
-            return await interaction.response.send_message("🚫 Désolée, seuls les fondas/couronnes peuvent valider 💅", ephemeral=True)
+            return await interaction.response.send_message("🚫 Tu n’as pas le droit de valider, sweetie 💅", ephemeral=True)
 
         gossip_ch, log_ch = await get_channels()
         role = gossip_ch.guild.get_role(PUBLIC_ROLE_ID)
@@ -203,12 +194,12 @@ class ValidationView(discord.ui.View):
         )
         await log_ch.send(embed=log_embed)
         await interaction.message.edit(content="💖 Gossip validé et publié ✨", view=None)
-        await interaction.response.send_message("💋 Gossip posté avec succès, XOXO 💄", ephemeral=True)
+        await interaction.response.send_message("💋 Gossip posté dans le salon public, XOXO 💄", ephemeral=True)
 
     @discord.ui.button(label="💔 Refuser", style=discord.ButtonStyle.danger, emoji="🚫", custom_id="gossip:deny")
     async def deny(self, interaction: discord.Interaction, _):
         if not await has_validation_role(interaction.user):
-            return await interaction.response.send_message("🚫 Tu n’as pas la permission de refuser, sweetie 💋", ephemeral=True)
+            return await interaction.response.send_message("🚫 Tu n’as pas la permission de refuser 💄", ephemeral=True)
 
         _, log_ch = await get_channels()
         log_embed = girly_embed(
@@ -220,21 +211,21 @@ class ValidationView(discord.ui.View):
             color=0xFFC0CB
         )
         await log_ch.send(embed=log_embed)
-        await interaction.message.edit(content="💔 Gossip refusé 💄", view=None)
-        await interaction.response.send_message("Refus noté, darling 💅", ephemeral=True)
+        await interaction.message.edit(content="💔 Gossip refusé 💅", view=None)
+        await interaction.response.send_message("Refus enregistré 💋", ephemeral=True)
 
-# --------- ACTIONS SUR POSTS ----------
+# --------- ACTIONS ----------
 class GossipActionsView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="💭 Répondre", style=discord.ButtonStyle.secondary, custom_id="gossip:reply")
+    @discord.ui.button(label="💭 Répondre", style=discord.ButtonStyle.secondary, emoji="💬", custom_id="gossip:reply")
     async def reply(self, interaction: discord.Interaction, _):
         if is_banned(interaction.user.id):
-            return await interaction.response.send_message("🚫 Tu es banni(e) des confessions 💔", ephemeral=True)
+            return await interaction.response.send_message("🚫 Tu es banni(e) 💔", ephemeral=True)
         await interaction.response.send_modal(ReplyModal(origin_message_id=interaction.message.id))
 
-    @discord.ui.button(label="🔐 Nouveau Gossip", style=discord.ButtonStyle.primary, custom_id="gossip:again")
+    @discord.ui.button(label="💌 Nouveau Gossip", style=discord.ButtonStyle.primary, emoji="💖", custom_id="gossip:again")
     async def again(self, interaction: discord.Interaction, _):
         await interaction.response.send_modal(SubmitModal())
 
@@ -266,7 +257,7 @@ class ReplyModal(discord.ui.Modal, title="💬 Répondre à ce gossip"):
             f"[Aller au thread]({thread.jump_url})"
         )
         await log_ch.send(embed=log_embed)
-        await interaction.response.send_message("💌 Réponse envoyée avec succès 💋", ephemeral=True)
+        await interaction.response.send_message("💌 Réponse envoyée 💋", ephemeral=True)
 
 # --------- AUTO PANEL ----------
 @bot.event
@@ -278,6 +269,5 @@ async def on_ready():
 # --------- START ----------
 if __name__ == "__main__":
     if TOKEN == "REPLACE_ME":
-        raise SystemExit("⚠️ Mets DISCORD_TOKEN dans Railway → Variables.")
+        raise SystemExit("⚠️ Ajoute ton DISCORD_TOKEN dans Railway ou .env")
     bot.run(TOKEN)
-
