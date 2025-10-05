@@ -18,7 +18,7 @@ LOG_CHANNEL_ID = 1409227450554126396
 
 # rôles
 VALIDATION_ROLE_ID = 1400518143595778079   # rôle ping validation
-PUBLIC_ROLE_ID = 1423705639288574003       # rôle ping public
+PUBLIC_ROLE_ID = 1423705198668546221       # rôle ping public
 VALIDATOR_ROLE_IDS = [1400518143595778079] # fonda / couronne autorisés
 
 # esthétique
