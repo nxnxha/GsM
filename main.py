@@ -1,143 +1,224 @@
 # -*- coding: utf-8 -*-
-# 💋 Gossip El HP — Version sans validation admin
-# by ChatGPT 💄
+# 💋 Gossip El HP — Version corrigée
+# Publication automatique + réponses + logs
+# by ChatGPT
 
-import os, json, logging, datetime as dt, random
+import os
+import json
+import logging
+import datetime as dt
+import random
+
 import discord
-from discord import app_commands
 from discord.ext import commands
 
-# --------- CONFIGURATION ----------
-TOKEN = os.getenv("DISCORD_TOKEN", "REPLACE_ME")
 
-# salons
+# ============================================================
+# CONFIGURATION
+# ============================================================
+
+TOKEN = os.getenv("DISCORD_TOKEN")
+
 GUILD_ID = 1297534530558758983
 GOSSIP_CHANNEL_ID = 1553007133107298364
 LOG_CHANNEL_ID = 1553294899829538836
 
-
-# esthétique
 AUTHOR_NAME = "💋 Gossip El HP"
 THEME_COLOR = 0xFFB6C1
+
 PANEL_BANNER_URL = ""
-PIN_MESSAGE = False
+
 BANLIST_FILE = "gossip_banlist.json"
 
-# --------- LOG ----------
-logging.basicConfig(level=logging.INFO)
+
+# ============================================================
+# LOGS
+# ============================================================
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+)
+
 log = logging.getLogger("gossip-elhp")
 
-# --------- BANLIST ----------
+
+# ============================================================
+# BANLIST
+# ============================================================
+
 def load_banlist() -> set[int]:
     try:
+        if not os.path.exists(BANLIST_FILE):
+            return set()
+
         with open(BANLIST_FILE, "r", encoding="utf-8") as f:
-            return set(int(x) for x in json.load(f))
-    except FileNotFoundError:
+            data = json.load(f)
+
+        return {int(x) for x in data}
+
+    except Exception:
+        log.exception("Erreur pendant la lecture de la banlist")
         return set()
-    except Exception as e:
-        log.exception("Erreur lecture banlist: %s", e)
-        return set()
+
 
 def save_banlist(bset: set[int]):
     try:
         with open(BANLIST_FILE, "w", encoding="utf-8") as f:
-            json.dump(list(bset), f)
-    except Exception as e:
-        log.exception("Erreur écriture banlist: %s", e)
+            json.dump(list(bset), f, indent=2)
+
+    except Exception:
+        log.exception("Erreur pendant la sauvegarde de la banlist")
+
 
 BANNED_USERS: set[int] = load_banlist()
 
-# --------- BOT ----------
+
+# ============================================================
+# INTENTS
+# ============================================================
+
 intents = discord.Intents.default()
+
+intents.guilds = True
 intents.members = True
+intents.messages = True
+
+
+# ============================================================
+# BOT
+# ============================================================
 
 class ElHPBot(commands.Bot):
+
     def __init__(self):
         super().__init__(
             command_prefix=commands.when_mentioned,
             intents=intents
         )
-        self.synced = False
+
+        self.panel_sent = False
 
     async def setup_hook(self):
-        # Views persistantes
+
+        # Enregistrement des boutons persistants
         self.add_view(PanelView())
         self.add_view(GossipActionsView())
 
-        gobj = discord.Object(id=GUILD_ID)
+        guild = discord.Object(id=GUILD_ID)
 
-        self.tree.copy_global_to(guild=gobj)
+        try:
+            self.tree.copy_global_to(guild=guild)
+            await self.tree.sync(guild=guild)
 
-        if not self.synced:
-            await self.tree.sync(guild=gobj)
-            self.synced = True
+            log.info("✅ Commandes synchronisées")
+
+        except Exception:
+            log.exception("❌ Impossible de synchroniser les commandes")
+
 
 bot = ElHPBot()
 
-# --------- UTILITAIRES ----------
-def sanitize(text: str, limit: int = 1800) -> str:
-    return text.strip()[:limit]
 
-def is_banned(uid: int) -> bool:
-    return uid in BANNED_USERS
+# ============================================================
+# UTILITAIRES
+# ============================================================
+
+def sanitize(text: str, limit: int = 1800) -> str:
+    text = str(text).strip()
+
+    if not text:
+        return "*(Message vide)*"
+
+    return text[:limit]
+
+
+def is_banned(user_id: int) -> bool:
+    return user_id in BANNED_USERS
+
+
+def is_yes(value: str) -> bool:
+    return str(value).lower().strip() in (
+        "oui",
+        "o",
+        "yes",
+        "y",
+        "true",
+        "1"
+    )
+
 
 async def get_channels():
-    guild = bot.get_guild(GUILD_ID) or await bot.fetch_guild(GUILD_ID)
 
-    gossip_ch = (
-        guild.get_channel(GOSSIP_CHANNEL_ID)
-        or await bot.fetch_channel(GOSSIP_CHANNEL_ID)
-    )
+    guild = bot.get_guild(GUILD_ID)
 
-    log_ch = (
-        guild.get_channel(LOG_CHANNEL_ID)
-        or await bot.fetch_channel(LOG_CHANNEL_ID)
-    )
+    if guild is None:
+        guild = await bot.fetch_guild(GUILD_ID)
 
-    return gossip_ch, log_ch
+    gossip_channel = bot.get_channel(GOSSIP_CHANNEL_ID)
+
+    if gossip_channel is None:
+        gossip_channel = await bot.fetch_channel(GOSSIP_CHANNEL_ID)
+
+    log_channel = bot.get_channel(LOG_CHANNEL_ID)
+
+    if log_channel is None:
+        log_channel = await bot.fetch_channel(LOG_CHANNEL_ID)
+
+    return gossip_channel, log_channel
+
 
 def girly_embed(
     title: str,
-    desc: str,
-    color=THEME_COLOR
+    description: str,
+    color: int = THEME_COLOR
 ) -> discord.Embed:
 
-    emb = discord.Embed(
+    embed = discord.Embed(
         title=title,
-        description=desc,
+        description=description,
         color=color,
-        timestamp=dt.datetime.utcnow()
+        timestamp=dt.datetime.now(dt.timezone.utc)
     )
 
-    emb.set_author(
+    embed.set_author(
         name=AUTHOR_NAME,
         icon_url="https://i.imgur.com/BqvDq6V.png"
     )
 
-    emb.set_footer(text="XOXO, Gossip El HP 💄")
+    embed.set_footer(
+        text="XOXO, Gossip El HP 💄"
+    )
 
-    return emb
+    return embed
 
-# --------- PANEL ----------
+
+# ============================================================
+# PANNEAU PRINCIPAL
+# ============================================================
+
 def embed_panel() -> discord.Embed:
-    emb = girly_embed(
+
+    embed = girly_embed(
         "💋 Gossip El HP — Le Mur des Secrets",
-        "Un secret ? Une rumeur ? Un crush interdit ?\n"
-        "Ici, tout se murmure… Clique ci-dessous pour te confesser 👀"
+        "Un secret ? Une rumeur ? Un crush interdit ?\n\n"
+        "Ici, tout se murmure…\n"
+        "Clique ci-dessous pour te confesser 👀"
     )
 
     if PANEL_BANNER_URL:
-        emb.set_image(url=PANEL_BANNER_URL)
+        embed.set_image(url=PANEL_BANNER_URL)
 
-    return emb
+    return embed
 
 
 class PanelView(discord.ui.View):
+
     def __init__(self):
         super().__init__(timeout=None)
 
     @discord.ui.button(
-        label="Soumettre un gossip 💌",
+        label="Soumettre un gossip",
         style=discord.ButtonStyle.primary,
         emoji="💖",
         custom_id="gossip:open"
@@ -145,34 +226,44 @@ class PanelView(discord.ui.View):
     async def open_modal(
         self,
         interaction: discord.Interaction,
-        _
+        button: discord.ui.Button
     ):
 
         if is_banned(interaction.user.id):
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 "🚫 Tu es banni(e) des confessions 💔",
                 ephemeral=True
             )
+            return
 
-        await interaction.response.send_modal(SubmitModal())
+        await interaction.response.send_modal(
+            SubmitModal()
+        )
 
 
-# --------- SUBMISSION ----------
+# ============================================================
+# MODAL GOSSIP
+# ============================================================
+
 class SubmitModal(
     discord.ui.Modal,
     title="✨ Nouveau Gossip 💄"
 ):
 
     content = discord.ui.TextInput(
-        label="Ton gossip (reste chic, gossip girl style)",
+        label="Ton gossip",
+        placeholder="Raconte ton gossip ici...",
         style=discord.TextStyle.paragraph,
-        max_length=1800
+        max_length=1800,
+        required=True
     )
 
     anonymous = discord.ui.TextInput(
         label="Publier en anonyme ? (oui/non)",
         style=discord.TextStyle.short,
-        default="oui"
+        default="oui",
+        max_length=10,
+        required=True
     )
 
     async def on_submit(
@@ -181,76 +272,118 @@ class SubmitModal(
     ):
 
         if is_banned(interaction.user.id):
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 "🚫 Tu es banni(e), darling 💔",
                 ephemeral=True
             )
+            return
 
+        # Discord affiche "Gossip El HP réfléchit..."
+        # pendant que le bot traite la demande.
         await interaction.response.defer(
             ephemeral=True,
             thinking=True
         )
 
-        gossip_ch, log_ch = await get_channels()
+        try:
 
-        text = sanitize(str(self.content))
+            gossip_channel, log_channel = await get_channels()
 
-        anon = (
-            str(self.anonymous)
-            .lower()
-            .strip()
-            in ("oui", "o", "yes", "y", "true", "1")
-        )
+            text = sanitize(self.content.value)
 
-        # --------- PUBLICATION DIRECTE ----------
-        role = gossip_ch.guild.get_role(PUBLIC_ROLE_ID)
+            anonymous = is_yes(
+                self.anonymous.value
+            )
 
-        public_embed = girly_embed(
-            random.choice([
-                "💖 Quelqu’un a chuchoté…",
-                "💅 On m’a soufflé quelque chose d’intéressant…",
-                "👠 Les rumeurs vont bon train à El HP High…"
-            ]),
-            f"> {text}"
-        )
+            # ------------------------------------------------
+            # PUBLICATION
+            # ------------------------------------------------
 
-        public = await gossip_ch.send(
-            content=role.mention if role else None,
-            embed=public_embed,
-            view=GossipActionsView()
-        )
+            public_embed = girly_embed(
+                random.choice([
+                    "💖 Quelqu’un a chuchoté…",
+                    "💅 On m’a soufflé quelque chose d’intéressant…",
+                    "👠 Les rumeurs vont bon train à El HP High…",
+                    "💋 Gossip Gossip Gossip…"
+                ]),
+                f"> {text}"
+            )
 
-        # --------- LOG ----------
-        auteur = (
-            "Anonyme"
-            if anon
-            else f"{interaction.user} (`{interaction.user.id}`)"
-        )
+            public_message = await gossip_channel.send(
+                embed=public_embed,
+                view=GossipActionsView()
+            )
 
-        log_embed = girly_embed(
-            "💖 Gossip publié automatiquement",
-            f"**Auteur :** {auteur}\n"
-            f"**Anonyme :** {'Oui' if anon else 'Non'}\n"
-            f"**Lien :** [Voir le gossip]({public.jump_url})\n\n"
-            f"**Contenu :**\n{text}",
-            color=0xFF69B4
-        )
+            # ------------------------------------------------
+            # LOG
+            # ------------------------------------------------
 
-        await log_ch.send(embed=log_embed)
+            auteur = (
+                "Anonyme"
+                if anonymous
+                else f"{interaction.user} (`{interaction.user.id}`)"
+            )
 
-        await interaction.followup.send(
-            "💋 Ton gossip vient d'être publié directement sur le mur, XOXO 💄",
-            ephemeral=True
-        )
+            log_embed = girly_embed(
+                "💖 Gossip publié automatiquement",
+                f"**Auteur :** {auteur}\n"
+                f"**Anonyme :** {'Oui' if anonymous else 'Non'}\n"
+                f"**Lien :** [Voir le gossip]({public_message.jump_url})\n\n"
+                f"**Contenu :**\n{text}",
+                color=0xFF69B4
+            )
+
+            await log_channel.send(
+                embed=log_embed
+            )
+
+            # ------------------------------------------------
+            # CONFIRMATION
+            # ------------------------------------------------
+
+            await interaction.followup.send(
+                "💋 Ton gossip vient d’être publié directement "
+                "sur le mur, XOXO 💄",
+                ephemeral=True
+            )
+
+            log.info(
+                "Gossip publié | auteur=%s | anonyme=%s",
+                interaction.user.id,
+                anonymous
+            )
+
+        except Exception as error:
+
+            log.exception(
+                "❌ ERREUR lors de la publication du gossip"
+            )
+
+            try:
+                await interaction.followup.send(
+                    "❌ Oups, Gossip El HP a rencontré un problème "
+                    "pendant la publication.\n\n"
+                    "Les logs ont été enregistrés.",
+                    ephemeral=True
+                )
+
+            except Exception:
+                log.exception(
+                    "Impossible d'envoyer le message d'erreur"
+                )
 
 
-# --------- ACTIONS ----------
+# ============================================================
+# BOUTONS DES GOSSIPS
+# ============================================================
+
 class GossipActionsView(discord.ui.View):
+
     def __init__(self):
         super().__init__(timeout=None)
 
     @discord.ui.button(
-        label="💭 Répondre",
+        label="Répondre",
         style=discord.ButtonStyle.secondary,
         emoji="💬",
         custom_id="gossip:reply"
@@ -258,14 +391,15 @@ class GossipActionsView(discord.ui.View):
     async def reply(
         self,
         interaction: discord.Interaction,
-        _
+        button: discord.ui.Button
     ):
 
         if is_banned(interaction.user.id):
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 "🚫 Tu es banni(e) 💔",
                 ephemeral=True
             )
+            return
 
         await interaction.response.send_modal(
             ReplyModal(
@@ -274,7 +408,7 @@ class GossipActionsView(discord.ui.View):
         )
 
     @discord.ui.button(
-        label="💌 Nouveau Gossip",
+        label="Nouveau Gossip",
         style=discord.ButtonStyle.primary,
         emoji="💖",
         custom_id="gossip:again"
@@ -282,45 +416,56 @@ class GossipActionsView(discord.ui.View):
     async def again(
         self,
         interaction: discord.Interaction,
-        _
+        button: discord.ui.Button
     ):
 
         if is_banned(interaction.user.id):
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 "🚫 Tu es banni(e) 💔",
                 ephemeral=True
             )
+            return
 
         await interaction.response.send_modal(
             SubmitModal()
         )
 
 
-# --------- REPLY ----------
+# ============================================================
+# MODAL RÉPONSE
+# ============================================================
+
 class ReplyModal(
     discord.ui.Modal,
     title="💬 Répondre à ce gossip"
 ):
 
-    def __init__(self, origin_message_id: int):
+    def __init__(
+        self,
+        origin_message_id: int
+    ):
         super().__init__()
 
         self.origin_message_id = origin_message_id
 
-        self.reply = discord.ui.TextInput(
+        self.reply_input = discord.ui.TextInput(
             label="Ta réponse",
+            placeholder="Écris ta réponse...",
             style=discord.TextStyle.paragraph,
-            max_length=1700
+            max_length=1700,
+            required=True
         )
 
-        self.anonymous = discord.ui.TextInput(
+        self.anonymous_input = discord.ui.TextInput(
             label="Anonyme ? (oui/non)",
             style=discord.TextStyle.short,
-            default="oui"
+            default="oui",
+            max_length=10,
+            required=True
         )
 
-        self.add_item(self.reply)
-        self.add_item(self.anonymous)
+        self.add_item(self.reply_input)
+        self.add_item(self.anonymous_input)
 
     async def on_submit(
         self,
@@ -328,86 +473,230 @@ class ReplyModal(
     ):
 
         if is_banned(interaction.user.id):
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 "🚫 Tu es banni(e) 💔",
                 ephemeral=True
             )
+            return
 
-        gossip_ch, log_ch = await get_channels()
-
-        origin = await gossip_ch.fetch_message(
-            self.origin_message_id
+        # Évite que Discord considère la réponse comme timeout
+        await interaction.response.defer(
+            ephemeral=True,
+            thinking=True
         )
 
-        thread = (
-            origin.thread
-            or await origin.create_thread(
-                name="💬 Réponses",
-                auto_archive_duration=1440
+        try:
+
+            gossip_channel, log_channel = await get_channels()
+
+            origin = await gossip_channel.fetch_message(
+                self.origin_message_id
             )
-        )
 
-        text = sanitize(str(self.reply))
+            # ------------------------------------------------
+            # THREAD
+            # ------------------------------------------------
 
-        anon = (
-            str(self.anonymous)
-            .lower()
-            .strip()
-            in ("oui", "o", "yes", "y", "true", "1")
-        )
+            thread = origin.thread
 
-        if anon:
-            await thread.send(
-                embed=girly_embed(
-                    "💭 Quelqu’un a répondu…",
-                    f"> {text}"
+            if thread is None:
+
+                thread = await origin.create_thread(
+                    name="💬 Réponses",
+                    auto_archive_duration=1440
                 )
+
+            text = sanitize(
+                self.reply_input.value
             )
-        else:
-            await thread.send(
-                f"**{interaction.user.display_name} :** {text}"
+
+            anonymous = is_yes(
+                self.anonymous_input.value
             )
 
-        # --------- LOG ----------
-        log_embed = girly_embed(
-            "💬 Nouvelle réponse",
-            f"**Auteur :** {interaction.user} (`{interaction.user.id}`)\n"
-            f"**Anonyme :** {'Oui' if anon else 'Non'}\n"
-            f"**Contenu :**\n{text}\n\n"
-            f"[Aller au thread]({thread.jump_url})"
-        )
+            # ------------------------------------------------
+            # PUBLICATION RÉPONSE
+            # ------------------------------------------------
 
-        await log_ch.send(embed=log_embed)
+            if anonymous:
 
-        await interaction.response.send_message(
-            "💌 Réponse envoyée 💋",
-            ephemeral=True
-        )
+                await thread.send(
+                    embed=girly_embed(
+                        "💭 Quelqu’un a répondu…",
+                        f"> {text}"
+                    )
+                )
+
+            else:
+
+                await thread.send(
+                    f"**{interaction.user.display_name} :** {text}"
+                )
+
+            # ------------------------------------------------
+            # LOG
+            # ------------------------------------------------
+
+            log_embed = girly_embed(
+                "💬 Nouvelle réponse",
+                f"**Auteur :** "
+                f"{interaction.user} (`{interaction.user.id}`)\n"
+                f"**Anonyme :** "
+                f"{'Oui' if anonymous else 'Non'}\n\n"
+                f"**Contenu :**\n{text}\n\n"
+                f"[Aller au thread]({thread.jump_url})"
+            )
+
+            await log_channel.send(
+                embed=log_embed
+            )
+
+            # ------------------------------------------------
+            # CONFIRMATION
+            # ------------------------------------------------
+
+            await interaction.followup.send(
+                "💌 Réponse envoyée 💋",
+                ephemeral=True
+            )
+
+            log.info(
+                "Réponse publiée | auteur=%s | anonyme=%s",
+                interaction.user.id,
+                anonymous
+            )
+
+        except Exception:
+
+            log.exception(
+                "❌ ERREUR lors de l'envoi d'une réponse"
+            )
+
+            try:
+
+                await interaction.followup.send(
+                    "❌ Oups, impossible d’envoyer ta réponse "
+                    "pour le moment.",
+                    ephemeral=True
+                )
+
+            except Exception:
+                log.exception(
+                    "Impossible d'envoyer le message d'erreur"
+                )
 
 
-# --------- AUTO PANEL ----------
+# ============================================================
+# READY
+# ============================================================
+
 @bot.event
 async def on_ready():
 
-    gossip_ch, _ = await get_channels()
-
-    await gossip_ch.send(
-        embed=embed_panel(),
-        view=PanelView()
+    log.info(
+        "✅ Connecté comme %s (%s)",
+        bot.user,
+        bot.user.id
     )
 
     log.info(
-        f"✅ Connecté comme {bot.user} — "
-        f"Gossip El HP est prête 💄"
+        "💋 Gossip El HP est opérationnelle"
+    )
+
+    # --------------------------------------------------------
+    # PANNEAU
+    # --------------------------------------------------------
+    #
+    # On ne renvoie PAS le panneau à chaque reconnexion.
+    # Cela évite d'avoir 50 panneaux identiques dans le salon.
+    #
+
+    if not bot.panel_sent:
+
+        try:
+
+            gossip_channel, _ = await get_channels()
+
+            # Cherche un panneau récent du bot
+            found = False
+
+            async for message in gossip_channel.history(
+                limit=50
+            ):
+
+                if (
+                    message.author.id == bot.user.id
+                    and message.embeds
+                    and message.embeds[0].title
+                    and "Gossip El HP" in message.embeds[0].title
+                ):
+                    found = True
+                    break
+
+            if not found:
+
+                await gossip_channel.send(
+                    embed=embed_panel(),
+                    view=PanelView()
+                )
+
+                log.info(
+                    "💖 Panneau Gossip envoyé"
+                )
+
+            else:
+
+                log.info(
+                    "💖 Panneau déjà présent, aucun doublon"
+                )
+
+            bot.panel_sent = True
+
+        except Exception:
+
+            log.exception(
+                "❌ Impossible d'initialiser le panneau"
+            )
+
+
+# ============================================================
+# ERREURS GLOBALES
+# ============================================================
+
+@bot.event
+async def on_error(
+    event_method,
+    *args,
+    **kwargs
+):
+
+    log.exception(
+        "❌ Erreur Discord dans %s",
+        event_method
     )
 
 
-# --------- START ----------
+# ============================================================
+# START
+# ============================================================
+
 if __name__ == "__main__":
 
-    if TOKEN == "REPLACE_ME":
+    if not TOKEN:
+
         raise SystemExit(
-            "⚠️ Ajoute ton DISCORD_TOKEN dans Railway ou .env"
+            "❌ DISCORD_TOKEN est absent des variables "
+            "d'environnement Railway."
         )
+
+    if TOKEN == "REPLACE_ME":
+
+        raise SystemExit(
+            "❌ Remplace REPLACE_ME par ton DISCORD_TOKEN."
+        )
+
+    log.info(
+        "🚀 Démarrage de Gossip El HP..."
+    )
 
     bot.run(TOKEN)
