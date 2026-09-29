@@ -3,6 +3,17 @@
 # ============================================================
 # 🖤 GOSSIP EL HP — DARK EDITION
 # ============================================================
+# - Panneau automatique
+# - Mise à jour du panneau existant au redémarrage
+# - Confessions anonymes
+# - Réponses en thread
+# - Logs avec vraie identité + ID Discord
+# - Bouton de blocage depuis les logs
+# - Banlist persistante
+# - /gossip_unban
+# - /gossip_check
+# - Boutons persistants après redémarrage
+# ============================================================
 
 import os
 import json
@@ -56,7 +67,6 @@ log = logging.getLogger("gossip-elhp")
 # ============================================================
 
 def load_banlist() -> set[int]:
-
     try:
         if not os.path.exists(BANLIST_FILE):
             return set()
@@ -68,15 +78,14 @@ def load_banlist() -> set[int]:
         ) as f:
             data = json.load(f)
 
-        return {int(x) for x in data}
+        return {int(user_id) for user_id in data}
 
     except Exception:
-        log.exception("Erreur lecture banlist")
+        log.exception("Erreur pendant la lecture de la banlist")
         return set()
 
 
 def save_banlist(bset: set[int]):
-
     try:
         with open(
             BANLIST_FILE,
@@ -90,7 +99,7 @@ def save_banlist(bset: set[int]):
             )
 
     except Exception:
-        log.exception("Erreur sauvegarde banlist")
+        log.exception("Erreur pendant la sauvegarde de la banlist")
 
 
 BANNED_USERS: set[int] = load_banlist()
@@ -123,7 +132,7 @@ intents.message_content = True
 
 
 # ============================================================
-# UTILITAIRES
+# OUTILS
 # ============================================================
 
 def sanitize(
@@ -199,7 +208,7 @@ def dark_embed(
 
 
 # ============================================================
-# PANNEAU
+# EMBED DU PANNEAU
 # ============================================================
 
 def embed_panel() -> discord.Embed:
@@ -227,21 +236,75 @@ def embed_panel() -> discord.Embed:
 
 
 # ============================================================
-# RÉCUPÉRATION DES SALONS
+# BOT
+# ============================================================
+
+class ElHPBot(commands.Bot):
+
+    def __init__(self):
+
+        super().__init__(
+            command_prefix=commands.when_mentioned,
+            intents=intents
+        )
+
+    async def setup_hook(self):
+
+        # Boutons persistants
+        self.add_view(
+            PanelView()
+        )
+
+        self.add_view(
+            GossipActionsView()
+        )
+
+        self.add_view(
+            LogActionsView()
+        )
+
+        # Synchronisation des commandes
+        guild = discord.Object(
+            id=GUILD_ID
+        )
+
+        try:
+
+            self.tree.copy_global_to(
+                guild=guild
+            )
+
+            await self.tree.sync(
+                guild=guild
+            )
+
+            log.info(
+                "Commandes synchronisées."
+            )
+
+        except Exception:
+
+            log.exception(
+                "Erreur pendant la synchronisation "
+                "des commandes."
+            )
+
+
+bot = ElHPBot()
+
+
+# ============================================================
+# SALONS
 # ============================================================
 
 async def get_channels():
-
-    guild = bot.get_guild(GUILD_ID)
-
-    if guild is None:
-        guild = await bot.fetch_guild(GUILD_ID)
 
     gossip_channel = bot.get_channel(
         GOSSIP_CHANNEL_ID
     )
 
     if gossip_channel is None:
+
         gossip_channel = await bot.fetch_channel(
             GOSSIP_CHANNEL_ID
         )
@@ -251,6 +314,7 @@ async def get_channels():
     )
 
     if log_channel is None:
+
         log_channel = await bot.fetch_channel(
             LOG_CHANNEL_ID
         )
@@ -259,13 +323,18 @@ async def get_channels():
 
 
 # ============================================================
-# PANNEAU VIEW
+# PANNEAU PRINCIPAL
 # ============================================================
 
-class PanelView(discord.ui.View):
+class PanelView(
+    discord.ui.View
+):
 
     def __init__(self):
-        super().__init__(timeout=None)
+
+        super().__init__(
+            timeout=None
+        )
 
     @discord.ui.button(
         label="Soumettre un gossip",
@@ -287,11 +356,20 @@ class PanelView(discord.ui.View):
                 "Tu n'as plus accès aux confessions.",
                 ephemeral=True
             )
+
             return
 
-        await interaction.response.send_modal(
-            SubmitModal()
-        )
+        try:
+
+            await interaction.response.send_modal(
+                SubmitModal()
+            )
+
+        except Exception:
+
+            log.exception(
+                "Erreur ouverture SubmitModal"
+            )
 
 
 # ============================================================
@@ -299,26 +377,39 @@ class PanelView(discord.ui.View):
 # ============================================================
 
 class SubmitModal(
-    discord.ui.Modal,
-    title="Gossip El HP"
+    discord.ui.Modal
 ):
 
-    content = discord.ui.TextInput(
-        label="Ton gossip",
-        placeholder="Écris ta confession...",
-        style=discord.TextStyle.paragraph,
-        max_length=1800,
-        required=True
-    )
+    def __init__(self):
 
-    anonymous = discord.ui.TextInput(
-        label="Publier anonymement ?",
-        placeholder="oui / non",
-        style=discord.TextStyle.short,
-        default="oui",
-        max_length=10,
-        required=True
-    )
+        super().__init__(
+            title="Gossip El HP"
+        )
+
+        self.content = discord.ui.TextInput(
+            label="Ton gossip",
+            placeholder="Écris ta confession...",
+            style=discord.TextStyle.paragraph,
+            max_length=1800,
+            required=True
+        )
+
+        self.anonymous = discord.ui.TextInput(
+            label="Publier anonymement ?",
+            placeholder="oui / non",
+            style=discord.TextStyle.short,
+            default="oui",
+            max_length=10,
+            required=True
+        )
+
+        self.add_item(
+            self.content
+        )
+
+        self.add_item(
+            self.anonymous
+        )
 
     async def on_submit(
         self,
@@ -333,6 +424,7 @@ class SubmitModal(
                 "Tu n'as plus accès aux confessions.",
                 ephemeral=True
             )
+
             return
 
         await interaction.response.defer(
@@ -354,9 +446,9 @@ class SubmitModal(
                 self.anonymous.value
             )
 
-            # --------------------------------------------
-            # PUBLIC
-            # --------------------------------------------
+            # ------------------------------------------------
+            # MESSAGE PUBLIC
+            # ------------------------------------------------
 
             public_embed = dark_embed(
                 random.choice([
@@ -375,23 +467,22 @@ class SubmitModal(
                 view=GossipActionsView()
             )
 
-            # --------------------------------------------
-            # INFOS RÉELLES POUR LES LOGS
-            # --------------------------------------------
+            # ------------------------------------------------
+            # IDENTITÉ RÉELLE
+            # ------------------------------------------------
 
             user_id = interaction.user.id
             username = interaction.user.name
             display_name = interaction.user.display_name
             mention = interaction.user.mention
 
-            # --------------------------------------------
+            # ------------------------------------------------
             # LOG
-            # --------------------------------------------
+            # ------------------------------------------------
 
             log_embed = dark_embed(
                 "NOUVEAU GOSSIP",
-                "Une nouvelle confession vient "
-                "d'être publiée.",
+                "Une nouvelle confession vient d'être publiée.",
                 RED_COLOR
             )
 
@@ -452,7 +543,7 @@ class SubmitModal(
                 anonymous
             )
 
-        except Exception:
+        except Exception as e:
 
             log.exception(
                 "Erreur publication gossip"
@@ -461,17 +552,20 @@ class SubmitModal(
             try:
 
                 await interaction.followup.send(
-                    "Une erreur est survenue "
-                    "pendant la publication.",
+                    "Erreur pendant la publication.\n"
+                    f"`{type(e).__name__}: {e}`",
                     ephemeral=True
                 )
 
             except Exception:
-                pass
+
+                log.exception(
+                    "Impossible d'envoyer le message d'erreur."
+                )
 
 
 # ============================================================
-# ACTIONS SUR LES GOSSIPS
+# BOUTONS DES GOSSIPS
 # ============================================================
 
 class GossipActionsView(
@@ -479,7 +573,10 @@ class GossipActionsView(
 ):
 
     def __init__(self):
-        super().__init__(timeout=None)
+
+        super().__init__(
+            timeout=None
+        )
 
     @discord.ui.button(
         label="Répondre",
@@ -501,13 +598,23 @@ class GossipActionsView(
                 "Tu n'as plus accès aux confessions.",
                 ephemeral=True
             )
+
             return
 
-        await interaction.response.send_modal(
-            ReplyModal(
-                interaction.message.id
+        try:
+
+            await interaction.response.send_modal(
+                ReplyModal(
+                    interaction.message.id
+                )
             )
-        )
+
+        except Exception:
+
+            log.exception(
+                "Erreur ouverture ReplyModal"
+            )
+
 
     @discord.ui.button(
         label="Nouveau Gossip",
@@ -529,11 +636,20 @@ class GossipActionsView(
                 "Tu n'as plus accès aux confessions.",
                 ephemeral=True
             )
+
             return
 
-        await interaction.response.send_modal(
-            SubmitModal()
-        )
+        try:
+
+            await interaction.response.send_modal(
+                SubmitModal()
+            )
+
+        except Exception:
+
+            log.exception(
+                "Erreur ouverture nouveau SubmitModal"
+            )
 
 
 # ============================================================
@@ -541,8 +657,7 @@ class GossipActionsView(
 # ============================================================
 
 class ReplyModal(
-    discord.ui.Modal,
-    title="Répondre au gossip"
+    discord.ui.Modal
 ):
 
     def __init__(
@@ -550,7 +665,9 @@ class ReplyModal(
         origin_message_id: int
     ):
 
-        super().__init__()
+        super().__init__(
+            title="Répondre au gossip"
+        )
 
         self.origin_message_id = (
             origin_message_id
@@ -594,6 +711,7 @@ class ReplyModal(
                 "Tu n'as plus accès aux confessions.",
                 ephemeral=True
             )
+
             return
 
         await interaction.response.defer(
@@ -628,9 +746,9 @@ class ReplyModal(
                 self.anonymous_input.value
             )
 
-            # --------------------------------------------
+            # ------------------------------------------------
             # PUBLIC
-            # --------------------------------------------
+            # ------------------------------------------------
 
             if anonymous:
 
@@ -649,9 +767,9 @@ class ReplyModal(
                     f"> {text}"
                 )
 
-            # --------------------------------------------
+            # ------------------------------------------------
             # LOG
-            # --------------------------------------------
+            # ------------------------------------------------
 
             log_embed = dark_embed(
                 "NOUVELLE RÉPONSE",
@@ -709,7 +827,7 @@ class ReplyModal(
                 ephemeral=True
             )
 
-        except Exception:
+        except Exception as e:
 
             log.exception(
                 "Erreur réponse gossip"
@@ -718,7 +836,8 @@ class ReplyModal(
             try:
 
                 await interaction.followup.send(
-                    "Impossible d'envoyer ta réponse.",
+                    "Erreur pendant l'envoi de la réponse.\n"
+                    f"`{type(e).__name__}: {e}`",
                     ephemeral=True
                 )
 
@@ -727,7 +846,7 @@ class ReplyModal(
 
 
 # ============================================================
-# LOG ACTIONS
+# ACTIONS DANS LES LOGS
 # ============================================================
 
 class LogActionsView(
@@ -735,7 +854,10 @@ class LogActionsView(
 ):
 
     def __init__(self):
-        super().__init__(timeout=None)
+
+        super().__init__(
+            timeout=None
+        )
 
     @discord.ui.button(
         label="Bloquer cet utilisateur",
@@ -754,18 +876,20 @@ class LogActionsView(
         ):
 
             await interaction.response.send_message(
-                "Tu n'as pas la permission "
-                "d'utiliser ce bouton.",
+                "Tu n'as pas la permission d'utiliser "
+                "ce bouton.",
                 ephemeral=True
             )
+
             return
 
         if not interaction.message.embeds:
 
             await interaction.response.send_message(
-                "Impossible de récupérer les informations.",
+                "Impossible de récupérer l'auteur.",
                 ephemeral=True
             )
+
             return
 
         embed = interaction.message.embeds[0]
@@ -785,7 +909,7 @@ class LogActionsView(
                 try:
                     user_id = int(raw_id)
                 except ValueError:
-                    pass
+                    user_id = None
 
                 break
 
@@ -795,14 +919,16 @@ class LogActionsView(
                 "ID Discord introuvable.",
                 ephemeral=True
             )
+
             return
 
         if bot.user and user_id == bot.user.id:
 
             await interaction.response.send_message(
-                "Impossible de bloquer le bot.",
+                "Je ne peux pas bloquer le bot.",
                 ephemeral=True
             )
+
             return
 
         already_banned = is_banned(
@@ -822,8 +948,8 @@ class LogActionsView(
         else:
 
             message = (
-                f"`{user_id}` est maintenant "
-                f"bloqué des confessions."
+                f"`{user_id}` est maintenant bloqué "
+                f"des confessions."
             )
 
         await interaction.response.send_message(
@@ -839,72 +965,7 @@ class LogActionsView(
 
 
 # ============================================================
-# BOT
-# ============================================================
-
-class ElHPBot(
-    commands.Bot
-):
-
-    def __init__(self):
-
-        super().__init__(
-            command_prefix=commands.when_mentioned,
-            intents=intents
-        )
-
-    async def setup_hook(self):
-
-        # ----------------------------------------------------
-        # VUES PERSISTANTES
-        # ----------------------------------------------------
-
-        self.add_view(
-            PanelView()
-        )
-
-        self.add_view(
-            GossipActionsView()
-        )
-
-        self.add_view(
-            LogActionsView()
-        )
-
-        # ----------------------------------------------------
-        # COMMANDES
-        # ----------------------------------------------------
-
-        guild = discord.Object(
-            id=GUILD_ID
-        )
-
-        try:
-
-            self.tree.copy_global_to(
-                guild=guild
-            )
-
-            await self.tree.sync(
-                guild=guild
-            )
-
-            log.info(
-                "Commandes synchronisées."
-            )
-
-        except Exception:
-
-            log.exception(
-                "Erreur synchronisation commandes"
-            )
-
-
-bot = ElHPBot()
-
-
-# ============================================================
-# COMMANDES ADMIN
+# COMMANDE UNBAN
 # ============================================================
 
 @bot.tree.command(
@@ -927,24 +988,33 @@ async def gossip_unban(
             "Tu n'as pas la permission.",
             ephemeral=True
         )
+
         return
 
     try:
-        target_id = int(user_id)
+
+        target_id = int(
+            user_id
+        )
+
     except ValueError:
 
         await interaction.response.send_message(
             "L'ID Discord doit être un nombre.",
             ephemeral=True
         )
+
         return
 
-    if not is_banned(target_id):
+    if not is_banned(
+        target_id
+    ):
 
         await interaction.response.send_message(
             f"`{target_id}` n'est pas bloqué.",
             ephemeral=True
         )
+
         return
 
     unban_user(
@@ -957,6 +1027,10 @@ async def gossip_unban(
         ephemeral=True
     )
 
+
+# ============================================================
+# COMMANDE CHECK
+# ============================================================
 
 @bot.tree.command(
     name="gossip_check",
@@ -978,16 +1052,22 @@ async def gossip_check(
             "Tu n'as pas la permission.",
             ephemeral=True
         )
+
         return
 
     try:
-        target_id = int(user_id)
+
+        target_id = int(
+            user_id
+        )
+
     except ValueError:
 
         await interaction.response.send_message(
             "L'ID Discord doit être un nombre.",
             ephemeral=True
         )
+
         return
 
     status = (
@@ -1014,70 +1094,93 @@ async def update_gossip_panel():
 
     existing_panel = None
 
-    # Cherche le panneau existant
-    async for message in gossip_channel.history(
-        limit=100
-    ):
+    try:
 
-        if message.author.id != bot.user.id:
-            continue
+        async for message in gossip_channel.history(
+            limit=100
+        ):
 
-        if not message.embeds:
-            continue
+            if message.author.id != bot.user.id:
+                continue
 
-        title = (
-            message.embeds[0].title or ""
-        ).strip().upper()
+            if not message.embeds:
+                continue
 
-        # IMPORTANT :
-        # on reconnaît uniquement le panneau
-        # et pas les confessions.
+            title = (
+                message.embeds[0].title or ""
+            ).strip().upper()
 
-        if title == "GOSSIP EL HP":
+            # Le panneau actuel
+            if title == "GOSSIP EL HP":
 
-            existing_panel = message
-            break
+                existing_panel = message
+                break
 
-    # --------------------------------------------------------
-    # PANNEAU EXISTANT → ON LE MET À JOUR
-    # --------------------------------------------------------
+    except Exception:
 
-    if existing_panel:
-
-        await existing_panel.edit(
-            embed=embed_panel(),
-            view=PanelView()
-        )
-
-        log.info(
-            "Panneau Gossip mis à jour."
+        log.exception(
+            "Impossible de parcourir l'historique "
+            "du salon Gossip."
         )
 
         return
 
     # --------------------------------------------------------
-    # PAS DE PANNEAU → ON EN CRÉE UN
+    # PANNEAU TROUVÉ
     # --------------------------------------------------------
 
-    await gossip_channel.send(
-        embed=embed_panel(),
-        view=PanelView()
-    )
+    if existing_panel:
 
-    log.info(
-        "Nouveau panneau Gossip créé."
-    )
+        try:
+
+            await existing_panel.edit(
+                embed=embed_panel(),
+                view=PanelView()
+            )
+
+            log.info(
+                "Panneau Gossip existant mis à jour."
+            )
+
+            return
+
+        except Exception:
+
+            log.exception(
+                "Impossible de modifier le panneau existant."
+            )
+
+    # --------------------------------------------------------
+    # PAS DE PANNEAU
+    # --------------------------------------------------------
+
+    try:
+
+        await gossip_channel.send(
+            embed=embed_panel(),
+            view=PanelView()
+        )
+
+        log.info(
+            "Nouveau panneau Gossip créé."
+        )
+
+    except Exception:
+
+        log.exception(
+            "Impossible de créer le panneau Gossip."
+        )
 
 
 # ============================================================
-# ON READY
+# READY
 # ============================================================
 
 @bot.event
 async def on_ready():
 
     log.info(
-        "Connecté : %s (%s)",
+        "Connecté comme %s (%s)",
         bot.user,
         bot.user.id
     )
@@ -1093,7 +1196,7 @@ async def on_ready():
     except Exception:
 
         log.exception(
-            "Impossible de mettre à jour le panneau."
+            "Erreur pendant l'initialisation du panneau."
         )
 
 
@@ -1115,7 +1218,7 @@ async def on_error(
 
 
 # ============================================================
-# START
+# DÉMARRAGE
 # ============================================================
 
 if __name__ == "__main__":
@@ -1123,12 +1226,12 @@ if __name__ == "__main__":
     if not TOKEN:
 
         raise SystemExit(
-            "DISCORD_TOKEN est absent des variables "
+            "❌ DISCORD_TOKEN est absent des variables "
             "d'environnement Railway."
         )
 
     log.info(
-        "Démarrage de Gossip El HP..."
+        "🚀 Démarrage de Gossip El HP..."
     )
 
     bot.run(TOKEN)
